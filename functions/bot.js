@@ -6,7 +6,7 @@ const { logError } = require('./utils/helpers');
 const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '7853851422:AAGDMjSxHz18WNX1DAVhcSVPIA4Xa6H_2yo',
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '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',
-  SITE_URL: process.env.SITE_URL || 'https://void-v0-bot.onrender.com',
+  SITE_URL: process.env.SITE_URL || 'https://void-gc6f.onrender.com',
   SITE_NAME: process.env.SITE_NAME || 'void-v0'
 };
 
@@ -29,7 +29,7 @@ const systemRole = "Вы void-v0, полезный ассистент, созд�
 const triggerWords = ['войд', 'воид', 'void', 'v0', 'в0'];
 
 // Флаг для включения аварийного режима, если API не отвечает
-const EMERGENCY_MODE = true;
+const EMERGENCY_MODE = process.env.EMERGENCY_MODE === 'true' || true;
 
 // Предопределенные ответы для аварийного режима
 const emergencyResponses = {
@@ -42,7 +42,10 @@ const emergencyResponses = {
   "кто тебя создал": "Меня создал @qynon.",
   "кто твой создатель": "Мой создатель - @qynon.",
   "как дела": "У меня всё хорошо, спасибо! Работаю в ограниченном режиме, но стараюсь быть полезным.",
-  "что ты умеешь": "Обычно я умею анализировать изображения и отвечать на вопросы. Сейчас работаю в ограниченном режиме."
+  "что ты умеешь": "Обычно я умею анализировать изображения и отвечать на вопросы. Сейчас работаю в ограниченном режиме.",
+  "тест": "Тест получен. Я работаю в аварийном режиме, но ваше сообщение доставлено. 👍",
+  "помощь": "Я могу анализировать изображения и отвечать на вопросы. Сейчас работаю в аварийном режиме с ограниченной функциональностью.",
+  "help": "Отправьте фотографию или задайте вопрос. В настоящее время я работаю в аварийном режиме с ограниченной функциональностью."
 };
 
 // Функция для скачивания изображения и конвертации в base64
@@ -368,6 +371,7 @@ bot.on('photo', async (ctx) => {
 // Обработка текстовых сообщений
 bot.on('text', async (ctx) => {
   try {
+    console.log('Получено текстовое сообщение:', ctx.message.text);
     const chatId = ctx.chat.id;
     const text = ctx.message.text.toLowerCase().trim();
     
@@ -398,22 +402,102 @@ bot.on('text', async (ctx) => {
     
     // Проверяем аварийные ответы
     if (EMERGENCY_MODE) {
-      // Ищем подходящий ключ в предопределенных ответах
-      const knownResponses = Object.keys(emergencyResponses);
-      const matchedKey = knownResponses.find(key => text.includes(key));
+      console.log('Работаем в аварийном режиме, ищем подходящий ответ для:', text);
       
-      if (matchedKey) {
-        await ctx.reply(emergencyResponses[matchedKey]);
+      // Улучшенный алгоритм поиска подходящего ответа
+      let bestMatch = null;
+      let maxScore = 0;
+      
+      for (const [key, response] of Object.entries(emergencyResponses)) {
+        // Точное соответствие ключевому слову
+        if (text === key) {
+          bestMatch = response;
+          break;
+        }
+        
+        // Слово содержится в сообщении полностью
+        if (text.includes(key)) {
+          const score = key.length / text.length; // Оценка по длине ключа
+          if (score > maxScore) {
+            maxScore = score;
+            bestMatch = response;
+          }
+        }
+      }
+      
+      if (bestMatch) {
+        console.log('Найден подходящий шаблонный ответ');
+        await ctx.reply(bestMatch);
         return;
       }
       
       // Общий ответ, если нет совпадений
-      await ctx.reply("Я работаю в ограниченном режиме из-за технических проблем с API. Попробуйте отправить мне изображение или задайте вопрос позже.");
+      console.log('Шаблонный ответ не найден, отправляем общий ответ');
+      await ctx.reply("Я работаю в ограниченном режиме из-за технических проблем с API. Я понимаю базовые фразы. Попробуйте написать 'помощь' для получения информации.");
       return;
     }
     
     // Если не аварийный режим, продолжаем обычную обработку текстовых сообщений
-    // (Остальной код обработки текстовых сообщений такой же, как и раньше...)
+    console.log('Обработка сообщения через API OpenRouter');
+
+    // Инициализация сессии пользователя, если она не существует
+    if (!userSessions[chatId]) {
+      userSessions[chatId] = {
+        history: [
+          { role: "system", content: systemRole }
+        ]
+      };
+    }
+    
+    // Добавляем сообщение пользователя в историю
+    userSessions[chatId].history.push({
+      role: "user",
+      content: text
+    });
+    
+    try {
+      // Получаем ответ от OpenRouter API
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${config.OPENROUTER_API_KEY}`,
+          "HTTP-Referer": config.SITE_URL,
+          "X-Title": config.SITE_NAME,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          "model": "opengvlab/internvl3-14b:free",
+          "messages": userSessions[chatId].history
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error.message || 'Неизвестная ошибка от OpenRouter API');
+      }
+      
+      const aiResponse = result.choices[0].message.content;
+      
+      // Добавляем ответ ИИ в историю
+      userSessions[chatId].history.push({
+        role: "assistant",
+        content: aiResponse
+      });
+      
+      // Обрезаем историю, если она становится слишком длинной
+      if (userSessions[chatId].history.length > 12) {
+        userSessions[chatId].history = [
+          userSessions[chatId].history[0],
+          ...userSessions[chatId].history.slice(-10)
+        ];
+      }
+      
+      await ctx.reply(aiResponse);
+    } catch (apiError) {
+      console.error('Ошибка при запросе к OpenRouter API:', apiError);
+      await ctx.reply("Извините, в данный момент я не могу обработать ваш запрос из-за проблем с API. Попробуйте позже.");
+    }
 
   } catch (error) {
     console.error('Общая ошибка при обработке сообщения:', error);
@@ -440,8 +524,4 @@ exports.processUpdate = async (update) => {
     logError('Bot Update', error);
     return { success: false, error: error.message };
   }
-};
-
-// Включение graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM')); 
+}; 
