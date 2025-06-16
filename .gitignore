@@ -1,10 +1,13 @@
 # Зависимости
-/node_modules
+node_modules/
 /.pnp
 .pnp.js
 package-lock.json
 
-# Переменные окружения
+# Тестирование
+/coverage
+
+# Локальная среда
 .env
 .env.local
 .env.development.local
@@ -21,14 +24,10 @@ yarn-error.log*
 # Временные файлы
 /temp
 .DS_Store
-.vercel
 .cache
 
 # Файлы IDE
-/.idea
-/.vscode
+.idea/
+.vscode/
 *.swp
-*.swo
-
-# Vercel
-.vercel 
+*.swo 

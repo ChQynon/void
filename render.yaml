@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: void-v0-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 16
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: SITE_NAME
+        value: void-v0 
