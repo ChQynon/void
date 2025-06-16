@@ -14,13 +14,14 @@
   "author": "@qynon",
   "license": "MIT",
   "dependencies": {
-    "node-telegram-bot-api": "^0.61.0",
-    "node-fetch": "^2.6.9",
     "dotenv": "^16.0.3",
     "fs-extra": "^11.1.1",
+    "node-fetch": "^2.6.9",
+    "node-telegram-bot-api": "^0.61.0",
     "telegraf": "^4.12.2"
   },
   "devDependencies": {
+    "dotenv-cli": "^8.0.0",
     "nodemon": "^2.0.22"
   }
-} 
+}
