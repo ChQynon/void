@@ -43,6 +43,22 @@ const systemRole = "Вы void-v0, полезный ассистент, созд�
 // Ключевые слова для упоминания в групповых чатах
 const triggerWords = ['войд', 'воид', 'void', 'v0', 'в0'];
 
+// Флаг для включения аварийного режима, если API не отвечает
+const EMERGENCY_MODE = true;
+
+// Предопределенные ответы для аварийного режима
+const emergencyResponses = {
+  "привет": "Привет! Я сейчас работаю в упрощенном режиме. Для полноценной работы нужно дождаться подключения к API.",
+  "здравствуй": "Здравствуйте! В данный момент я функционирую в ограниченном режиме.",
+  "хай": "Привет! Сейчас я работаю без подключения к API, поэтому отвечаю шаблонными фразами.",
+  "сука": "Пожалуйста, воздержитесь от использования ненормативной лексики в общении.",
+  "почему ты не работаешь": "Я работаю, но сейчас у меня ограниченный режим из-за проблем с подключением к API. Разработчик уже работает над решением проблемы.",
+  "кто тебя создал": "Меня создал @qynon.",
+  "кто твой создатель": "Мой создатель - @qynon.",
+  "как дела": "У меня всё хорошо, спасибо! Работаю в ограниченном режиме, но стараюсь быть полезным.",
+  "что ты умеешь": "Обычно я умею анализировать изображения и отвечать на вопросы. Сейчас работаю в ограниченном режиме."
+};
+
 // Функция для скачивания изображения и конвертации в base64
 async function downloadImageAsBase64(url) {
   try {
@@ -374,7 +390,7 @@ bot.on('photo', async (ctx) => {
 bot.on('text', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
-    const text = ctx.message.text;
+    const text = ctx.message.text.toLowerCase().trim();
     
     // Игнорируем команды
     if (text.startsWith('/')) return;
@@ -387,7 +403,7 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    // Проверяем, не является ли сообщение математической операцией
+    // Обработка математических операций
     if (/^\d+[\+\-\*\/]\d+$/.test(text.replace(/\s/g, ''))) {
       try {
         // Безопасно вычисляем результат
@@ -397,10 +413,27 @@ bot.on('text', async (ctx) => {
         await ctx.reply(`${expression} = ${result}`);
         return;
       } catch (err) {
-        // Если не удалось вычислить, продолжаем обычную обработку
         console.log('Ошибка при вычислении:', err);
       }
     }
+    
+    // Проверяем аварийные ответы
+    if (EMERGENCY_MODE) {
+      // Ищем подходящий ключ в предопределенных ответах
+      const knownResponses = Object.keys(emergencyResponses);
+      const matchedKey = knownResponses.find(key => text.includes(key));
+      
+      if (matchedKey) {
+        await ctx.reply(emergencyResponses[matchedKey]);
+        return;
+      }
+      
+      // Общий ответ, если нет совпадений
+      await ctx.reply("Я работаю в ограниченном режиме из-за технических проблем с API. Попробуйте отправить мне изображение или задайте вопрос позже.");
+      return;
+    }
+    
+    // Если не аварийный режим, продолжаем обычную обработку
     
     // Инициализация сессии пользователя, если она не существует
     if (!userSessions[chatId]) {
@@ -432,74 +465,102 @@ bot.on('text', async (ctx) => {
       ...userSessions[chatId].history.slice(1)
     ];
     
-    // Получаем ответ от OpenRouter API
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${config.OPENROUTER_API_KEY}`,
-        "HTTP-Referer": config.SITE_URL,
-        "X-Title": config.SITE_NAME,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        "model": "opengvlab/internvl3-14b:free",
-        "messages": messagesWithReminder
-      })
-    });
-    
-    const result = await response.json();
-    
-    if (result.error) {
-      throw new Error(result.error.message || 'Неизвестная ошибка от OpenRouter API');
+    try {
+      // Получаем ответ от OpenRouter API с таймаутом
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут
+      
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${config.OPENROUTER_API_KEY}`,
+          "HTTP-Referer": config.SITE_URL,
+          "X-Title": config.SITE_NAME,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          "model": "opengvlab/internvl3-14b:free",
+          "messages": messagesWithReminder
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`API вернул ошибку: ${response.status} ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error.message || 'Неизвестная ошибка от OpenRouter API');
+      }
+      
+      // Проверяем ответ на упоминание неправильного создателя
+      let aiResponse = result.choices[0].message.content;
+      
+      // Специальная обработка для вопроса "кто тебя создал"
+      if (text.includes('кто тебя создал') || 
+          text.includes('кто создал тебя') || 
+          text.includes('кто твой создатель') || 
+          text.includes('кто разработал тебя') ||
+          text.includes('кто тебя разработал')) {
+        aiResponse = "Меня создал @qynon.";
+      } 
+      // Если в ответе упоминается неправильный создатель, исправляем его
+      else if (aiResponse.toLowerCase().includes('sensetime') || 
+          aiResponse.toLowerCase().includes('openai') ||
+          aiResponse.toLowerCase().includes('антропик') || 
+          aiResponse.toLowerCase().includes('anthropic') ||
+          aiResponse.toLowerCase().includes('google') ||
+          aiResponse.toLowerCase().includes('гугл') ||
+          aiResponse.toLowerCase().includes('microsoft') ||
+          aiResponse.toLowerCase().includes('майкрософт')) {
+        aiResponse = "Я void-v0, создан @qynon. " + aiResponse.split('.').slice(1).join('.').trim();
+      }
+      
+      // Добавляем ответ ИИ в историю
+      userSessions[chatId].history.push({
+        role: "assistant",
+        content: aiResponse
+      });
+      
+      // Обрезаем историю, если она становится слишком длинной (оставляем последние 10 сообщений)
+      if (userSessions[chatId].history.length > 12) { // система + 10 сообщений + буфер
+        userSessions[chatId].history = [
+          userSessions[chatId].history[0],
+          ...userSessions[chatId].history.slice(-10)
+        ];
+      }
+      
+      // Отправляем ответ пользователю
+      await ctx.replyWithMarkdown(aiResponse, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    } catch (apiError) {
+      console.error('Ошибка при обращении к API:', apiError);
+      
+      // В случае ошибки API, используем аварийный ответ
+      const emergencyReply = 
+        text.includes('кто тебя создал') || text.includes('кто твой создатель') ? 
+        "Меня создал @qynon." : 
+        "Извините, я временно не могу получить доступ к своим основным функциям из-за проблем с API. Попробуйте позже или отправьте простой вопрос.";
+      
+      await ctx.reply(emergencyReply, {
+        reply_to_message_id: ctx.message.message_id
+      });
     }
-    
-    // Проверяем ответ на упоминание неправильного создателя
-    let aiResponse = result.choices[0].message.content;
-    
-    // Специальная обработка для вопроса "кто тебя создал"
-    if (text.toLowerCase().includes('кто тебя создал') || 
-        text.toLowerCase().includes('кто создал тебя') || 
-        text.toLowerCase().includes('кто твой создатель') || 
-        text.toLowerCase().includes('кто разработал тебя') ||
-        text.toLowerCase().includes('кто тебя разработал')) {
-      aiResponse = "Меня создал @qynon.";
-    } 
-    // Если в ответе упоминается неправильный создатель, исправляем его
-    else if (aiResponse.toLowerCase().includes('sensetime') || 
-        aiResponse.toLowerCase().includes('openai') ||
-        aiResponse.toLowerCase().includes('антропик') || 
-        aiResponse.toLowerCase().includes('anthropic') ||
-        aiResponse.toLowerCase().includes('google') ||
-        aiResponse.toLowerCase().includes('гугл') ||
-        aiResponse.toLowerCase().includes('microsoft') ||
-        aiResponse.toLowerCase().includes('майкрософт')) {
-      aiResponse = "Я void-v0, создан @qynon. " + aiResponse.split('.').slice(1).join('.').trim();
-    }
-    
-    // Добавляем ответ ИИ в историю
-    userSessions[chatId].history.push({
-      role: "assistant",
-      content: aiResponse
-    });
-    
-    // Обрезаем историю, если она становится слишком длинной (оставляем последние 10 сообщений)
-    if (userSessions[chatId].history.length > 12) { // система + 10 сообщений + буфер
-      userSessions[chatId].history = [
-        userSessions[chatId].history[0],
-        ...userSessions[chatId].history.slice(-10)
-      ];
-    }
-    
-    // Отправляем ответ пользователю
-    await ctx.replyWithMarkdown(aiResponse, {
-      reply_to_message_id: ctx.message.message_id
-    });
   } catch (error) {
-    console.error('Ошибка при обработке сообщения:', error);
-    await ctx.replyWithMarkdown(
-      "К сожалению, не удалось обработать ваше сообщение. Пожалуйста, попробуйте позже.",
-      { reply_to_message_id: ctx.message.message_id }
-    );
+    console.error('Общая ошибка при обработке сообщения:', error);
+    try {
+      await ctx.reply(
+        "К сожалению, произошла ошибка при обработке вашего сообщения. Разработчики уже работают над исправлением.",
+        { reply_to_message_id: ctx.message.message_id }
+      );
+    } catch (replyError) {
+      console.error('Не удалось отправить ответ об ошибке:', replyError);
+    }
   }
 });
 
