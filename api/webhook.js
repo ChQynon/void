@@ -3,7 +3,27 @@ const fetch = require('node-fetch');
 const fs = require('fs-extra');
 const path = require('path');
 const https = require('https');
-const config = require('../config');
+
+// Загружаем конфигурацию, учитывая возможные ошибки с путями в Vercel
+let config;
+try {
+  // Пытаемся загрузить конфиг из корня проекта
+  config = require('../config');
+} catch (error) {
+  try {
+    // Если не получилось, пробуем загрузить конфиг из текущей папки
+    config = require('./config');
+  } catch (innerError) {
+    // Создаём резервную конфигурацию, если не удалось загрузить
+    console.warn('Не удалось загрузить файл конфигурации, использую значения по умолчанию');
+    config = {
+      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '7853851422:AAGDMjSxHz18WNX1DAVhcSVPIA4Xa6H_2yo',
+      OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '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',
+      SITE_URL: process.env.SITE_URL || 'https://void-teal.vercel.app',
+      SITE_NAME: process.env.SITE_NAME || 'void-v0'
+    };
+  }
+}
 
 // Инициализация бота с опцией для webhook
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
@@ -365,6 +385,21 @@ bot.on('text', async (ctx) => {
     // В групповых чатах отвечаем только на упоминания или ответы на сообщения бота
     if (isGroup && !shouldRespondInGroup(ctx.message)) {
       return;
+    }
+    
+    // Проверяем, не является ли сообщение математической операцией
+    if (/^\d+[\+\-\*\/]\d+$/.test(text.replace(/\s/g, ''))) {
+      try {
+        // Безопасно вычисляем результат
+        const expression = text.replace(/\s/g, '').replace(/[^0-9\+\-\*\/]/g, '');
+        // eslint-disable-next-line no-eval
+        const result = eval(expression);
+        await ctx.reply(`${expression} = ${result}`);
+        return;
+      } catch (err) {
+        // Если не удалось вычислить, продолжаем обычную обработку
+        console.log('Ошибка при вычислении:', err);
+      }
     }
     
     // Инициализация сессии пользователя, если она не существует
