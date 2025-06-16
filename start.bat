@@ -1,0 +1,3 @@
+@echo off
+echo Запуск бота void-v0...
+npm start 

@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "name": "void-v0-bot",
+  "builds": [
+    {
+      "src": "api/webhook.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/webhook.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+} 
